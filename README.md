@@ -6,7 +6,7 @@ A Flask service that aggregates health and activity data from multiple sources f
 
 ### Data Sources
 - **Oura Ring** - Sleep, activity, readiness, cycling, and calorie data
-- **Digitransit** - Live Helsinki bike station availability (Alepa bikes)
+- **Digitransit** - Live Helsinki bike station availability and public transport timetables
 - **Fitbit** - Weight tracking
 
 ### Endpoints
@@ -24,6 +24,8 @@ A Flask service that aggregates health and activity data from multiple sources f
 | `readiness` | Oura | Latest readiness score (0-100) |
 | `calories_consumed` | Oura | Total calories burned today |
 | `weight` | Fitbit | Latest weight measurement (kg) |
+| `tram_1_to_eira` | Digitransit | Minutes until next tram 1 to Eira |
+| `bus_66_to_paloheina_ice_rink` | Digitransit | Minutes until next bus 66 to Paloheinä |
 | `calories_intake` | Placeholder | Food calories (requires nutrition API) |
 | `pohjolankatu_alepabikes` | Digitransit | Available bikes at Pohjolankatu station |
 | `koskelantie_alepabikes` | Digitransit | Available bikes at Koskelantie station |
@@ -78,12 +80,14 @@ Server runs on `http://localhost:8000`
 
 ## Project Structure
 ```
-├── app.py           # Flask application and routes
-├── oura.py          # Oura API integration
-├── digitransit.py   # Digitransit API integration
-├── fitbit.py        # Fitbit API integration
-├── requirements.txt # Python dependencies
-└── .env            # Environment variables (not in git)
+├── app.py              # Flask application and routes
+├── sources/
+│   └── transport.py   # Public transport timetables
+├── oura.py             # Oura API integration
+├── digitransit.py      # Digitransit bike stations
+├── fitbit.py           # Fitbit API integration
+├── requirements.txt    # Python dependencies
+└── .env               # Environment variables (not in git)
 ```
 
 ## Example Response
@@ -91,6 +95,7 @@ Server runs on `http://localhost:8000`
 {
   "activity_percentage": 77,
   "biked_km": 1185.1,
+  "bus_66_to_paloheina_ice_rink": 1,
   "calories_consumed": 2753,
   "calories_intake": 0,
   "koskelantie_alepabikes": 0,
@@ -99,6 +104,7 @@ Server runs on `http://localhost:8000`
   "sleep_score": 80,
   "sleep_time": 7.81,
   "steps": 6493,
+  "tram_1_to_eira": 422,
   "weight": 88.0
 }
 ```

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import oura
 import digitransit
 import fitbit
+from sources import transport
 
 load_dotenv()
 
@@ -32,6 +33,8 @@ def root_custom_json():
     daily_metrics = oura.get_daily_metrics()
     
     weight_kg = fitbit.get_latest_weight()
+    
+    timetables = transport.get_timetables()
 
     # TODO: replace remaining placeholder values with real sources (FatSecret, etc.)
     resp = {
@@ -46,6 +49,8 @@ def root_custom_json():
         "calories_intake": 0,  # Placeholder - requires nutrition API
         "calories_consumed": calories_burned,
         "weight": weight_kg,
+        "tram_1_to_eira": timetables["tram_1_to_eira"],
+        "bus_66_to_paloheina_ice_rink": timetables["bus_66_to_paloheina_ice_rink"],
     }
     return jsonify(resp)
 
