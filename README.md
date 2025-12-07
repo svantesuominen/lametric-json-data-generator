@@ -81,10 +81,9 @@ Server runs on `http://localhost:8000`
 ## Project Structure
 ```
 ├── app.py              # Flask application and routes
-├── sources/
-│   └── transport.py   # Public transport timetables
 ├── oura.py             # Oura API integration
 ├── digitransit.py      # Digitransit bike stations
+├── transport.py        # Public transport timetables
 ├── fitbit.py           # Fitbit API integration
 ├── requirements.txt    # Python dependencies
 └── .env               # Environment variables (not in git)
