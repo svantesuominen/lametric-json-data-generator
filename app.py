@@ -4,6 +4,7 @@ from flask import Flask, jsonify
 from dotenv import load_dotenv
 import oura
 import digitransit
+import fitbit
 
 load_dotenv()
 
@@ -29,6 +30,8 @@ def root_custom_json():
     calories_burned = oura.get_activity_calories()
     
     daily_metrics = oura.get_daily_metrics()
+    
+    weight_kg = fitbit.get_latest_weight()
 
     # TODO: replace remaining placeholder values with real sources (FatSecret, etc.)
     resp = {
@@ -40,8 +43,9 @@ def root_custom_json():
         "readiness": daily_metrics["readiness_score"],
         "sleep_time": sleep_hours,
         "sleep_score": sleep_score,
-        "calories_intake": 2232,  # Placeholder - requires nutrition API
+        "calories_intake": 0,  # Placeholder - requires nutrition API
         "calories_consumed": calories_burned,
+        "weight": weight_kg,
     }
     return jsonify(resp)
 
