@@ -24,7 +24,7 @@ A Flask service that aggregates health and activity data from multiple sources f
 | `activity_percentage` | Oura | Today's activity score (0-100) |
 | `readiness` | Oura | Latest readiness score (0-100) |
 | `calories_consumed` | Oura | Total calories burned today (e.g. "2500 kcal") |
-| `weight` | Fitbit | Latest weight measurement (kg) |
+| `weight` | Fitbit | Latest weight measurement (e.g. "88,5 kg") |
 | `tram_1_to_eira` | Digitransit | Next 3 departures (HH:MM, ...) for Tram 1 |
 | `bus_66_to_paloheina_ice_rink` | Digitransit | Next 3 departures (HH:MM, ...) for Bus 66 |
 | `calories_intake` | Placeholder | Food calories (requires nutrition API) |
@@ -54,7 +54,7 @@ Edit `.env` and add your API keys:
 ```
 DIGITRANSIT_KEY=your_digitransit_api_key
 OURA_ACCESS_TOKEN=your_oura_personal_access_token
-FITBIT_ACCESS_TOKEN=your_fitbit_access_token
+# Note: For Fitbit, use the auth helper script (see below)
 ```
 
 ### 3. Run
@@ -78,9 +78,13 @@ Server runs on `http://localhost:8000`
 
 ### Fitbit API
 1. Register your app at [Fitbit Developer Console](https://dev.fitbit.com/apps)
-2. Use OAuth 2.0 flow to get an access token (see [Fitbit OAuth docs](https://dev.fitbit.com/build/reference/web-api/oauth2/))
-3. Add to `.env` as `FITBIT_ACCESS_TOKEN`
-4. Note: Access tokens expire after 8 hours
+   - Set "Redirect URL" to `http://localhost:8080`
+2. Run the helper script to authenticate:
+   ```bash
+   python3 auth_fitbit.py
+   ```
+3. Follow the instructions to log in and copy the tokens to your `.env` file.
+4. The app handles token refreshing automatically.
 
 ## Project Structure
 ```
@@ -109,7 +113,7 @@ Server runs on `http://localhost:8000`
   "sleep_time": "7 h 48 min",
   "steps": 6493,
   "tram_1_to_eira": "15:42, 16:51, 16:00",
-  "weight": 88.0,
+  "weight": "88,5 kg",
   "kapyla_ice": "Closed",
   "kapyla_ice_rink": "Closed",
   "ogeli_ice": "Ice-covered"

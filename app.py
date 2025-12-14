@@ -39,7 +39,9 @@ def root_custom_json():
     
     daily_metrics = oura.get_daily_metrics()
     
-    weight_kg = fitbit.get_latest_weight()
+    weight_kg_val = fitbit.get_latest_weight()
+    # Format: "88,5 kg" (using comma as decimal separator per user request "xy,z")
+    weight_str = f"{weight_kg_val:.1f}".replace('.', ',') + " kg"
     
     timetables = transport.get_timetables()
     
@@ -57,7 +59,7 @@ def root_custom_json():
         "sleep_score": sleep_score,
         "calories_intake": 0,  # Placeholder - requires nutrition API
         "calories_consumed": calories_str,
-        "weight": weight_kg,
+        "weight": weight_str,
         "tram_1_to_eira": timetables["tram_1_to_eira"],
         "bus_66_to_paloheina_ice_rink": timetables["bus_66_to_paloheina_ice_rink"],
         "kapyla_ice": rink_conditions["kapyla_ice"],
