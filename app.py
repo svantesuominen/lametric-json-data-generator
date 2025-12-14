@@ -6,6 +6,7 @@ import oura
 import digitransit
 import fitbit
 import transport
+import hockey
 
 load_dotenv()
 
@@ -21,36 +22,47 @@ def root_custom_json():
 
     # Fetch Oura data
     biked_m = oura.get_cycling_distance_this_year()
-    biked_km = round(biked_m / 1000, 1)
+    biked_m = oura.get_cycling_distance_this_year()
+    biked_km_int = int(round(biked_m / 1000))
+    biked_str = f"{biked_km_int} km"
     
     sleep_data = oura.get_sleep_data() or {}
     sleep_seconds = sleep_data.get("total_sleep_duration", 0)
-    sleep_hours = round(sleep_seconds / 3600, 2)
+    sleep_seconds = sleep_data.get("total_sleep_duration", 0)
+    s_hours = sleep_seconds // 3600
+    s_mins = (sleep_seconds % 3600) // 60
+    sleep_time_str = f"{s_hours} h {s_mins} min"
     sleep_score = sleep_data.get("score", 0)
     
     calories_burned = oura.get_activity_calories()
+    calories_str = f"{int(round(calories_burned))} kcal"
     
     daily_metrics = oura.get_daily_metrics()
     
     weight_kg = fitbit.get_latest_weight()
     
     timetables = transport.get_timetables()
+    
+    rink_conditions = hockey.get_rink_conditions()
 
     # TODO: replace remaining placeholder values with real sources (FatSecret, etc.)
     resp = {
-        "biked_km": biked_km,
+        "biked_distance": biked_str,
         "pohjolankatu_alepabikes": counts["pohjolankatu_bikes"],
         "koskelantie_alepabikes": counts["koskelantie_bikes"],
         "steps": daily_metrics["steps"],
         "activity_percentage": daily_metrics["activity_score"],
         "readiness": daily_metrics["readiness_score"],
-        "sleep_time": sleep_hours,
+        "sleep_time": sleep_time_str,
         "sleep_score": sleep_score,
         "calories_intake": 0,  # Placeholder - requires nutrition API
-        "calories_consumed": calories_burned,
+        "calories_consumed": calories_str,
         "weight": weight_kg,
         "tram_1_to_eira": timetables["tram_1_to_eira"],
         "bus_66_to_paloheina_ice_rink": timetables["bus_66_to_paloheina_ice_rink"],
+        "kapyla_ice": rink_conditions["kapyla_ice"],
+        "kapyla_ice_rink": rink_conditions["kapyla_ice_rink"],
+        "ogeli_ice": rink_conditions["ogeli_ice"],
     }
     return jsonify(resp)
 

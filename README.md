@@ -8,6 +8,7 @@ A Flask service that aggregates health and activity data from multiple sources f
 - **Oura Ring** - Sleep, activity, readiness, cycling, and calorie data
 - **Digitransit** - Live Helsinki bike station availability and public transport timetables
 - **Fitbit** - Weight tracking
+- **Helsinki Service Map** - Real-time ice rink conditions
 
 ### Endpoints
 - `GET /` - Returns JSON with all metrics
@@ -16,19 +17,22 @@ A Flask service that aggregates health and activity data from multiple sources f
 ### Metrics Provided
 | Metric | Source | Description |
 |--------|--------|-------------|
-| `biked_km` | Oura | Total cycling distance for current year (km) |
-| `sleep_time` | Oura | Latest sleep duration (hours) |
+| `biked_distance` | Oura | Total cycling distance for current year (e.g. "1234 km") |
+| `sleep_time` | Oura | Latest sleep duration (e.g. "7 h 45 min") |
 | `sleep_score` | Oura | Latest sleep quality score (0-100) |
 | `steps` | Oura | Today's step count |
 | `activity_percentage` | Oura | Today's activity score (0-100) |
 | `readiness` | Oura | Latest readiness score (0-100) |
-| `calories_consumed` | Oura | Total calories burned today |
+| `calories_consumed` | Oura | Total calories burned today (e.g. "2500 kcal") |
 | `weight` | Fitbit | Latest weight measurement (kg) |
-| `tram_1_to_eira` | Digitransit | Minutes until next tram 1 to Eira |
-| `bus_66_to_paloheina_ice_rink` | Digitransit | Minutes until next bus 66 to Paloheinä |
+| `tram_1_to_eira` | Digitransit | Next 3 departures (HH:MM, ...) for Tram 1 |
+| `bus_66_to_paloheina_ice_rink` | Digitransit | Next 3 departures (HH:MM, ...) for Bus 66 |
 | `calories_intake` | Placeholder | Food calories (requires nutrition API) |
 | `pohjolankatu_alepabikes` | Digitransit | Available bikes at Pohjolankatu station |
 | `koskelantie_alepabikes` | Digitransit | Available bikes at Koskelantie station |
+| `kapyla_ice` | Service Map | Condition of Käpylä artificial ice rink |
+| `kapyla_ice_rink` | Service Map | Condition of Käpylä ice hockey rink |
+| `ogeli_ice` | Service Map | Condition of Oulunkylä artificial ice rink |
 
 ## Setup
 
@@ -85,6 +89,7 @@ Server runs on `http://localhost:8000`
 ├── digitransit.py      # Digitransit bike stations
 ├── transport.py        # Public transport timetables
 ├── fitbit.py           # Fitbit API integration
+├── hockey.py           # Ice rink conditions (Service Map API)
 ├── requirements.txt    # Python dependencies
 └── .env               # Environment variables (not in git)
 ```
@@ -93,18 +98,21 @@ Server runs on `http://localhost:8000`
 ```json
 {
   "activity_percentage": 77,
-  "biked_km": 1185.1,
-  "bus_66_to_paloheina_ice_rink": 1,
-  "calories_consumed": 2753,
+  "biked_distance": "1234 km",
+  "bus_66_to_paloheina_ice_rink": "15:45, 16:01, 16:24",
+  "calories_consumed": "2753 kcal",
   "calories_intake": 0,
   "koskelantie_alepabikes": 0,
   "pohjolankatu_alepabikes": 0,
   "readiness": 81,
   "sleep_score": 80,
-  "sleep_time": 7.81,
+  "sleep_time": "7 h 48 min",
   "steps": 6493,
-  "tram_1_to_eira": 422,
-  "weight": 88.0
+  "tram_1_to_eira": "15:42, 16:51, 16:00",
+  "weight": 88.0,
+  "kapyla_ice": "Closed",
+  "kapyla_ice_rink": "Closed",
+  "ogeli_ice": "Ice-covered"
 }
 ```
 
