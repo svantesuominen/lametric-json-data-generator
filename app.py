@@ -22,12 +22,10 @@ def root_custom_json():
 
     # Fetch Oura data
     biked_m = oura.get_cycling_distance_this_year()
-    biked_m = oura.get_cycling_distance_this_year()
     biked_km_int = int(round(biked_m / 1000))
     biked_str = f"{biked_km_int} km"
     
     sleep_data = oura.get_sleep_data() or {}
-    sleep_seconds = sleep_data.get("total_sleep_duration", 0)
     sleep_seconds = sleep_data.get("total_sleep_duration", 0)
     s_hours = sleep_seconds // 3600
     s_mins = (sleep_seconds % 3600) // 60
