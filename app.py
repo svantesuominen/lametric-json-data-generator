@@ -18,7 +18,8 @@ def root_custom_json():
     try:
         counts = digitransit.fetch_bike_counts()
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        print(f"Error fetching bike counts: {e}")
+        counts = {"pohjolankatu_bikes": 0, "koskelantie_bikes": 0}
 
     # Fetch Oura data
     biked_m = oura.get_cycling_distance_this_year()
@@ -41,9 +42,17 @@ def root_custom_json():
     # Format: "88,5 kg" (using comma as decimal separator per user request "xy,z")
     weight_str = f"{weight_kg_val:.1f}".replace('.', ',') + " kg"
     
-    timetables = transport.get_timetables()
-    
-    rink_conditions = hockey.get_rink_conditions()
+    try:
+        timetables = transport.get_timetables()
+    except Exception as e:
+        print(f"Error fetching timetables: {e}")
+        timetables = {"tram_1_to_eira": "N/A", "bus_66_to_paloheina_ice_rink": "N/A"}
+        
+    try:
+        rink_conditions = hockey.get_rink_conditions()
+    except Exception as e:
+        print(f"Error fetching hockey info: {e}")
+        rink_conditions = {"kapyla_ice": "N/A", "kapyla_ice_rink": "N/A", "ogeli_ice": "N/A"}
 
     # TODO: replace remaining placeholder values with real sources (FatSecret, etc.)
     resp = {
@@ -69,14 +78,52 @@ def root_custom_json():
 # --- 2) Optional LaMetric-native format (handy if you also want direct My Data DIY) ---
 @app.route("/lametric")
 def lametric_frames():
+    # 1. Fetch Bike Data
     try:
         counts = digitransit.fetch_bike_counts()
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        print(f"Error fetching bike counts: {e}")
+        counts = {"pohjolankatu_bikes": 0, "koskelantie_bikes": 0}
+
+    # 2. Fetch Oura Data
+    try:
+        daily_metrics = oura.get_daily_metrics()
+        sleep_data = oura.get_sleep_data() or {}
+        biked_m = oura.get_cycling_distance_this_year()
+        calories_burned = oura.get_activity_calories()
+    except Exception as e:
+        print(f"Error fetching Oura data: {e}")
+        daily_metrics = {"steps": 0, "readiness_score": 0}
+        sleep_data = {}
+        biked_m = 0
+        calories_burned = 0
+
+    # 3. Fetch Fitbit Data
+    try:
+        weight_kg = fitbit.get_latest_weight()
+    except Exception as e:
+        print(f"Error fetching Fitbit data: {e}")
+        weight_kg = 0
+
+    # Format values
+    biked_km = int(round(biked_m / 1000))
+    sleep_seconds = sleep_data.get("total_sleep_duration", 0)
+    s_hours = sleep_seconds // 3600
+    s_mins = (sleep_seconds % 3600) // 60
+    weight_str = f"{weight_kg:.1f}".replace('.', ',')
 
     frames = [
-        {"text": f"{counts['pohjolankatu_name']}: {counts['pohjolankatu_bikes']} 🚲", "icon": "i1234"},
-        {"text": f"{counts['koskelantie_name']}: {counts['koskelantie_bikes']} 🚲", "icon": "i1234"},
+        # Health & Activity
+        {"text": f"{daily_metrics['steps']} steps", "icon": "i49"},
+        {"text": f"{daily_metrics['readiness_score']} readiness", "icon": "i29"},
+        {"text": f"{s_hours}h {s_mins}m sleep", "icon": "i90"},
+        {"text": f"{int(round(calories_burned))} kcal", "icon": "i25"},
+        {"text": f"{biked_km} km cycled", "icon": "i1234"},
+        {"text": f"{weight_str} kg", "icon": "i2110"},
+        
+        # Bike Stations
+        {"text": f"Pohjola: {counts['pohjolankatu_bikes']} 🚲", "icon": "i1234"},
+        {"text": f"Koskela: {counts['koskelantie_bikes']} 🚲", "icon": "i1234"},
     ]
     return jsonify({"frames": frames})
 
