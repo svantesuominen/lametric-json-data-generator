@@ -252,5 +252,47 @@ def get_daily_metrics():
     
     return result
 
-
-
+def get_avg_hrv_heartrate(days=3):
+    """
+    Fetch sleep data and calculate average HRV and Heart Rate for the most recent N days.
+    Returns a dict with 'avg_hrv' and 'avg_heart_rate' (ints).
+    """
+    today = datetime.date.today()
+    last_week = today - datetime.timedelta(days=7)
+    
+    params = {
+        "start_date": last_week.isoformat(),
+        "end_date": today.isoformat()
+    }
+    
+    url = f"{OURA_API_URL}/sleep"
+    data = make_request(url, params=params)
+    if not data:
+        return {"avg_hrv": 0, "avg_heart_rate": 0}
+    
+    docs = data.get("data", [])
+    if not docs:
+        return {"avg_hrv": 0, "avg_heart_rate": 0}
+        
+    # Sort docs by day descending
+    sorted_docs = sorted(docs, key=lambda x: x.get("day", ""), reverse=True)
+    
+    # Filter for entries that have both HRV and HR
+    valid_docs = [
+        d for d in sorted_docs 
+        if d.get("average_hrv") is not None and d.get("average_heart_rate") is not None
+    ]
+    
+    # Take the most recent 'days' documents
+    recent_docs = valid_docs[:days]
+    if not recent_docs:
+        return {"avg_hrv": 0, "avg_heart_rate": 0}
+        
+    total_hrv = sum(d["average_hrv"] for d in recent_docs)
+    total_hr = sum(d["average_heart_rate"] for d in recent_docs)
+    
+    count = len(recent_docs)
+    return {
+        "avg_hrv": int(round(total_hrv / count)),
+        "avg_heart_rate": int(round(total_hr / count))
+    }

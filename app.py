@@ -37,6 +37,7 @@ def root_custom_json():
     calories_str = f"{int(round(calories_burned))} kcal"
     
     daily_metrics = oura.get_daily_metrics()
+    avg_metrics = oura.get_avg_hrv_heartrate(3)
     
     weight_kg_val = fitbit.get_latest_weight()
     # Format: "88,5 kg" (using comma as decimal separator per user request "xy,z")
@@ -64,6 +65,8 @@ def root_custom_json():
         "readiness": daily_metrics["readiness_score"],
         "sleep_time": sleep_time_str,
         "sleep_score": sleep_score,
+        "avg_hrv_3d": avg_metrics["avg_hrv"],
+        "avg_rest_hr_3d": avg_metrics["avg_heart_rate"],
         "calories_intake": 0,  # Placeholder - requires nutrition API
         "calories_consumed": calories_str,
         "weight": weight_str,
@@ -91,12 +94,14 @@ def lametric_frames():
         sleep_data = oura.get_sleep_data() or {}
         biked_m = oura.get_cycling_distance_this_year()
         calories_burned = oura.get_activity_calories()
+        avg_metrics = oura.get_avg_hrv_heartrate(3)
     except Exception as e:
         print(f"Error fetching Oura data: {e}")
         daily_metrics = {"steps": 0, "readiness_score": 0}
         sleep_data = {}
         biked_m = 0
         calories_burned = 0
+        avg_metrics = {"avg_hrv": 0, "avg_heart_rate": 0}
 
     # 3. Fetch Fitbit Data
     try:
@@ -120,6 +125,8 @@ def lametric_frames():
         {"text": f"{int(round(calories_burned))} kcal", "icon": "i25"},
         {"text": f"{biked_km} km cycled", "icon": "i1234"},
         {"text": f"{weight_str} kg", "icon": "i2110"},
+        {"text": f"{avg_metrics['avg_hrv']} hrv (3d)", "icon": "i52"},
+        {"text": f"{avg_metrics['avg_heart_rate']} bpm (3d)", "icon": "i31"},
         
         # Bike Stations
         {"text": f"Pohjola: {counts['pohjolankatu_bikes']} 🚲", "icon": "i1234"},

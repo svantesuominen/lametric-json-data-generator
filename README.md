@@ -25,6 +25,8 @@ A Flask service that aggregates health and activity data from multiple sources f
 | `readiness` | Oura | Latest readiness score (0-100) |
 | `calories_consumed` | Oura | Total calories burned today (e.g. "2500 kcal") |
 | `weight` | Fitbit | Latest weight measurement (e.g. "88,5 kg") |
+| `avg_hrv_3d` | Oura | Average Heart Rate Variability for the last 3 days |
+| `avg_rest_hr_3d` | Oura | Average Resting Heart Rate for the last 3 days |
 | `tram_1_to_eira` | Digitransit | Next 3 departures (HH:MM, ...) for Tram 1 |
 | `bus_66_to_paloheina_ice_rink` | Digitransit | Next 3 departures (HH:MM, ...) for Bus 66 |
 | `calories_intake` | Placeholder | Food calories (requires nutrition API) |
