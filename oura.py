@@ -1,7 +1,7 @@
-
 import os
 import requests
 import datetime
+from collections import defaultdict
 from dotenv import load_dotenv, set_key
 
 # Load environment variables
@@ -145,6 +145,35 @@ def get_sleep_data():
     }
     return result
 
+def _sum_workout_distance_meters(start_date, end_date, activities):
+    """
+    Sum workout distances (meters) for activities in the given set.
+    Follows Oura next_token pagination for large ranges.
+    """
+    url = f"{OURA_API_URL}/workout"
+    total_distance = 0.0
+    next_token = None
+    while True:
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+        if next_token:
+            params["next_token"] = next_token
+        workout_data = make_request(url, params=params)
+        if not workout_data:
+            break
+        for w in workout_data.get("data", []):
+            if w.get("activity") in activities:
+                distance = w.get("distance")
+                if distance is not None:
+                    total_distance += float(distance)
+        next_token = workout_data.get("next_token")
+        if not next_token:
+            break
+    return total_distance
+
+
 def get_cycling_distance_this_year():
     """
     Sum distance for 'cycling' workouts for the current year.
@@ -152,26 +181,136 @@ def get_cycling_distance_this_year():
     """
     today = datetime.date.today()
     start_of_year = datetime.date(today.year, 1, 1)
-    
+    return _sum_workout_distance_meters(start_of_year, today, frozenset({"cycling"}))
+
+
+def get_running_distance_this_year():
+    """
+    Sum distance for 'running' workouts for the current year.
+    Returns total distance in meters.
+    """
+    today = datetime.date.today()
+    start_of_year = datetime.date(today.year, 1, 1)
+    return _sum_workout_distance_meters(start_of_year, today, frozenset({"running"}))
+
+
+# Rolling window for sleep-debt heuristic (not configurable via env).
+_SLEEP_DEBT_WINDOW_DAYS = 14
+
+
+def _collect_paginated(endpoint, start_date, end_date):
+    """Fetch all documents for a usercollection endpoint that supports next_token."""
+    url = f"{OURA_API_URL}/{endpoint}"
+    rows = []
+    next_token = None
+    while True:
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+        if next_token:
+            params["next_token"] = next_token
+        data = make_request(url, params=params)
+        if not data:
+            break
+        rows.extend(data.get("data", []))
+        next_token = data.get("next_token")
+        if not next_token:
+            break
+    return rows
+
+
+def _daily_aggregate_duration_to_seconds(value):
+    """
+    Convert a duration from daily_sleep-style fields to seconds.
+    Heuristic: large values = seconds; mid-range = minutes; small = hours.
+    """
+    if value is None:
+        return None
+    v = float(value)
+    if v >= 2000:
+        return int(round(v))
+    if v >= 120:
+        return int(round(v * 60))
+    return int(round(v * 3600))
+
+
+def get_sleep_debt_heuristic():
+    """
+    Rolling sum of max(0, need - actual) over recent days.
+    Need comes from daily_sleep.sleep_need (Oura API). Actual prefers summed
+    /sleep session total_sleep_duration per day (seconds); falls back to
+    daily_sleep.total_sleep_duration when no sessions exist for that day.
+    Not the same as Oura app Sleep Debt.
+
+    Returns dict: debt_seconds, window_days.
+    """
+    today = datetime.date.today()
+    start = today - datetime.timedelta(days=_SLEEP_DEBT_WINDOW_DAYS)
+
+    daily_docs = _collect_paginated("daily_sleep", start, today)
+    sleep_docs = _collect_paginated("sleep", start, today)
+
+    by_day_seconds = defaultdict(float)
+    for doc in sleep_docs:
+        day = doc.get("day")
+        dur = doc.get("total_sleep_duration")
+        if not day or dur is None:
+            continue
+        by_day_seconds[day] += float(dur)
+
+    debt = 0
+    for doc in daily_docs:
+        day = doc.get("day")
+        if not day:
+            continue
+        need_raw = doc.get("sleep_need")
+        if need_raw is None:
+            continue
+        need_sec = _daily_aggregate_duration_to_seconds(need_raw)
+        if need_sec is None:
+            continue
+
+        actual_sec = int(round(by_day_seconds.get(day, 0.0)))
+        if actual_sec <= 0:
+            at = doc.get("total_sleep_duration")
+            if at is not None:
+                conv = _daily_aggregate_duration_to_seconds(at)
+                if conv is not None:
+                    actual_sec = conv
+
+        shortfall = need_sec - actual_sec
+        if shortfall > 0:
+            debt += shortfall
+
+    return {"debt_seconds": debt, "window_days": _SLEEP_DEBT_WINDOW_DAYS}
+
+
+def get_latest_cardiovascular_age():
+    """
+    Latest vascular_age from daily_cardiovascular_age, or None if unavailable.
+    """
+    today = datetime.date.today()
+    start = today - datetime.timedelta(days=14)
     params = {
-        "start_date": start_of_year.isoformat(),
-        "end_date": today.isoformat()
+        "start_date": start.isoformat(),
+        "end_date": today.isoformat(),
     }
-    
-    url = f"{OURA_API_URL}/workout"
-    workout_data = make_request(url, params=params)
-    if not workout_data:
-        return 0.0
-    
-    total_distance = 0.0
-    for w in workout_data.get("data", []):
-        # Check workout type
-        if w.get("activity") == "cycling":
-            distance = w.get("distance")
-            if distance is not None:
-                total_distance += float(distance)
-            
-    return total_distance
+    url = f"{OURA_API_URL}/daily_cardiovascular_age"
+    data = make_request(url, params=params)
+    if not data:
+        return None
+    docs = data.get("data", [])
+    if not docs:
+        return None
+    latest = sorted(docs, key=lambda x: x.get("day", ""), reverse=True)[0]
+    age = latest.get("vascular_age")
+    if age is None:
+        return None
+    try:
+        return int(round(float(age)))
+    except (TypeError, ValueError):
+        return None
 
 def get_activity_calories():
     """

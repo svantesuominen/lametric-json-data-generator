@@ -12,6 +12,15 @@ load_dotenv()
 
 app = Flask(__name__)
 
+
+def _format_sleep_debt_seconds(sec):
+    h = int(sec) // 3600
+    m = (int(sec) % 3600) // 60
+    if h:
+        return f"{h} h {m} min"
+    return f"{m} min"
+
+
 # --- 1) Your custom JSON shape (for your broader dashboard needs) ---
 @app.route("/")
 def root_custom_json():
@@ -25,7 +34,15 @@ def root_custom_json():
     biked_m = oura.get_cycling_distance_this_year()
     biked_km_int = int(round(biked_m / 1000))
     biked_str = f"{biked_km_int} km"
-    
+
+    ran_m = oura.get_running_distance_this_year()
+    ran_km_int = int(round(ran_m / 1000))
+    ran_str = f"{ran_km_int} km"
+
+    debt_info = oura.get_sleep_debt_heuristic()
+    sleep_debt_est_str = _format_sleep_debt_seconds(debt_info["debt_seconds"])
+    cardiovascular_age = oura.get_latest_cardiovascular_age()
+
     sleep_data = oura.get_sleep_data() or {}
     sleep_seconds = sleep_data.get("total_sleep_duration", 0)
     s_hours = sleep_seconds // 3600
@@ -58,6 +75,10 @@ def root_custom_json():
     # TODO: replace remaining placeholder values with real sources (FatSecret, etc.)
     resp = {
         "biked_distance": biked_str,
+        "running_distance": ran_str,
+        "sleep_debt_est": sleep_debt_est_str,
+        "sleep_debt_seconds": debt_info["debt_seconds"],
+        "cardiovascular_age": cardiovascular_age,
         "pohjolankatu_alepabikes": counts["pohjolankatu_bikes"],
         "koskelantie_alepabikes": counts["koskelantie_bikes"],
         "steps": daily_metrics["steps"],
@@ -93,6 +114,9 @@ def lametric_frames():
         daily_metrics = oura.get_daily_metrics()
         sleep_data = oura.get_sleep_data() or {}
         biked_m = oura.get_cycling_distance_this_year()
+        ran_m = oura.get_running_distance_this_year()
+        debt_info = oura.get_sleep_debt_heuristic()
+        cv_age = oura.get_latest_cardiovascular_age()
         calories_burned = oura.get_activity_calories()
         avg_metrics = oura.get_avg_hrv_heartrate(3)
     except Exception as e:
@@ -100,6 +124,9 @@ def lametric_frames():
         daily_metrics = {"steps": 0, "readiness_score": 0}
         sleep_data = {}
         biked_m = 0
+        ran_m = 0
+        debt_info = {"debt_seconds": 0}
+        cv_age = None
         calories_burned = 0
         avg_metrics = {"avg_hrv": 0, "avg_heart_rate": 0}
 
@@ -112,18 +139,26 @@ def lametric_frames():
 
     # Format values
     biked_km = int(round(biked_m / 1000))
+    ran_km = int(round(ran_m / 1000))
+    dsec = debt_info["debt_seconds"]
+    dh = dsec // 3600
+    dm = (dsec % 3600) // 60
     sleep_seconds = sleep_data.get("total_sleep_duration", 0)
     s_hours = sleep_seconds // 3600
     s_mins = (sleep_seconds % 3600) // 60
     weight_str = f"{weight_kg:.1f}".replace('.', ',')
+    cv_text = f"CV {cv_age}" if cv_age is not None else "CV n/a"
 
     frames = [
         # Health & Activity
         {"text": f"{daily_metrics['steps']} steps", "icon": "i49"},
         {"text": f"{daily_metrics['readiness_score']} readiness", "icon": "i29"},
         {"text": f"{s_hours}h {s_mins}m sleep", "icon": "i90"},
+        {"text": f"{dh}h {dm}m debt est", "icon": "i90"},
         {"text": f"{int(round(calories_burned))} kcal", "icon": "i25"},
         {"text": f"{biked_km} km cycled", "icon": "i1234"},
+        {"text": f"{ran_km} km run", "icon": "i1234"},
+        {"text": cv_text, "icon": "i52"},
         {"text": f"{weight_str} kg", "icon": "i2110"},
         {"text": f"{avg_metrics['avg_hrv']} hrv (3d)", "icon": "i52"},
         {"text": f"{avg_metrics['avg_heart_rate']} bpm (3d)", "icon": "i31"},

@@ -98,34 +98,39 @@ def make_request(url):
         print(f"Error making Fitbit request: {e}")
         return None
 
+def _weight_entry_sort_key(entry):
+    """Sort key: chronological order (date + time of day)."""
+    d = entry.get("date") or ""
+    t = entry.get("time") or "00:00:00"
+    return (d, t)
+
+
 def get_latest_weight():
     """
-    Fetch the most recent weight measurement.
-    Returns weight in kg, or 0 if no data available.
+    Fetch the most recent weight measurement from Fitbit body logs.
+    Returns weight in the user's unit system (see Fitbit localization), or 0 if unavailable.
     """
-    # Fetch weight logs for the last 30 days
     today = datetime.date.today()
-    
-    url = f"{FITBIT_API_URL}/body/log/weight/date/{today.isoformat()}/30d.json"
-    
-    data = make_request(url)
-    if not data:
-        return 0.0
-        
-    try:
-        # Get the weight logs
-        weight_logs = data.get("weight", [])
-        if not weight_logs:
+    end = today.isoformat()
+
+    # Try shorter windows first; many users log rarely, so fall back to longer ranges.
+    for period in ("30d", "1y", "max"):
+        url = f"{FITBIT_API_URL}/body/log/weight/date/{end}/{period}.json"
+        data = make_request(url)
+        if not data:
             return 0.0
-        
-        # Sort by date and get the most recent
-        latest = sorted(weight_logs, key=lambda x: x.get("date", ""), reverse=True)[0]
-        
-        # Weight is returned in kg by Fitbit API
-        weight_kg = latest.get("weight", 0)
-        
-        return float(weight_kg) if weight_kg else 0.0
-        
-    except Exception as e:
-        print(f"Error parsing Fitbit weight data: {e}")
-        return 0.0
+
+        try:
+            weight_logs = data.get("weight") or []
+            if not weight_logs:
+                continue
+
+            latest = sorted(weight_logs, key=_weight_entry_sort_key, reverse=True)[0]
+            weight_kg = latest.get("weight", 0)
+            if weight_kg:
+                return float(weight_kg)
+        except Exception as e:
+            print(f"Error parsing Fitbit weight data: {e}")
+            return 0.0
+
+    return 0.0
