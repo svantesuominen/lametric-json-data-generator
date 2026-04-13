@@ -88,7 +88,15 @@ def make_request(url, params=None):
             else:
                 print("Token refresh failed or not possible.")
                 return None
-                
+
+        if r.status_code in (401, 403):
+            detail = (r.text or "").strip()[:800] or "(empty body)"
+            print(
+                f"Oura HTTP {r.status_code} (after refresh if applicable). "
+                f"Often: missing OAuth scope, lapsed membership, or data not available for this account. "
+                f"Response: {detail}"
+            )
+
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -286,31 +294,30 @@ def get_sleep_debt_heuristic():
     return {"debt_seconds": debt, "window_days": _SLEEP_DEBT_WINDOW_DAYS}
 
 
+# Oura often returns vascular_age null for the most recent day while the value is still stabilizing;
+# older days usually have the last good estimate. Use pagination and skip nulls.
+_CARDIOVASCULAR_AGE_LOOKBACK_DAYS = 90
+
+
 def get_latest_cardiovascular_age():
     """
-    Latest vascular_age from daily_cardiovascular_age, or None if unavailable.
+    Most recent daily cardiovascular age (vascular_age) from Oura.
+    Walks newest-to-oldest days and returns the first non-null vascular_age.
     """
     today = datetime.date.today()
-    start = today - datetime.timedelta(days=14)
-    params = {
-        "start_date": start.isoformat(),
-        "end_date": today.isoformat(),
-    }
-    url = f"{OURA_API_URL}/daily_cardiovascular_age"
-    data = make_request(url, params=params)
-    if not data:
-        return None
-    docs = data.get("data", [])
+    start = today - datetime.timedelta(days=_CARDIOVASCULAR_AGE_LOOKBACK_DAYS)
+    docs = _collect_paginated("daily_cardiovascular_age", start, today)
     if not docs:
         return None
-    latest = sorted(docs, key=lambda x: x.get("day", ""), reverse=True)[0]
-    age = latest.get("vascular_age")
-    if age is None:
-        return None
-    try:
-        return int(round(float(age)))
-    except (TypeError, ValueError):
-        return None
+    for doc in sorted(docs, key=lambda x: x.get("day") or "", reverse=True):
+        age = doc.get("vascular_age")
+        if age is None:
+            continue
+        try:
+            return int(round(float(age)))
+        except (TypeError, ValueError):
+            continue
+    return None
 
 def get_activity_calories():
     """

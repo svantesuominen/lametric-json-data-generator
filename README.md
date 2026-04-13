@@ -25,6 +25,9 @@ A Flask service that aggregates health and activity data from multiple sources f
 | `readiness` | Oura | Latest readiness score (0-100) |
 | `calories_consumed` | Oura | Total calories burned today (e.g. "2500 kcal") |
 | `weight` | Fitbit | Latest weight measurement (e.g. "88,5 kg") |
+| `running_distance` | Oura | Running distance YTD (e.g. "42 km") |
+| `sleep_debt_est` / `sleep_debt_seconds` | Oura | Heuristic debt from `daily_sleep.sleep_need` vs actual sleep |
+| `cardiovascular_age` | Oura | Latest `vascular_age` from Oura (null if unavailable or unauthorized) |
 | `avg_hrv_3d` | Oura | Average Heart Rate Variability for the last 3 days |
 | `avg_rest_hr_3d` | Oura | Average Resting Heart Rate for the last 3 days |
 | `tram_1_to_eira` | Digitransit | Next 3 departures (HH:MM, ...) for Tram 1 |
@@ -52,12 +55,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and add your API keys:
-```
-DIGITRANSIT_KEY=your_digitransit_api_key
-OURA_ACCESS_TOKEN=your_oura_personal_access_token
-# Note: For Fitbit, use the auth helper script (see below)
-```
+Edit `.env` using [`.env.example`](.env.example) as a template. You need **all** variables your integrations use; Fitbit weight refresh requires **four** Fitbit OAuth variables (access + refresh + client id + secret).
 
 ### 3. Run
 ```bash
@@ -73,10 +71,16 @@ Server runs on `http://localhost:8000`
 2. Create an API key
 3. Add to `.env` as `DIGITRANSIT_KEY`
 
-### Oura API
-1. Go to [Oura Cloud](https://cloud.ouraring.com/personal-access-tokens)
-2. Generate a Personal Access Token
-3. Add to `.env` as `OURA_ACCESS_TOKEN`
+### Oura API (OAuth2)
+Personal Access Tokens are deprecated for new integrations. Use an [Oura OAuth application](https://cloud.ouraring.com/oauth/applications).
+
+1. Create an app and note **Client ID** and **Client Secret**.
+2. Authorize with a **space-separated scope** list that includes at least:
+   - **`daily`** — sleep, readiness, daily summaries, **cardiovascular age**, sleep debt heuristic (`daily_sleep`), etc.
+   - **`workout`** — cycling and running distance from workouts.
+3. Exchange the authorization code for **`access_token`** and **`refresh_token`** and add to `.env` (`OURA_ACCESS_TOKEN`, `OURA_REFRESH_TOKEN`, plus client id/secret).
+
+If logs show **HTTP 401 on `daily_cardiovascular_age` even after a successful token refresh**, the access token is valid but **not allowed** to read that resource: re-authorize and ensure the **`daily`** scope is granted, confirm your ring/tier supports Cardiovascular Age in the Oura app, and check membership status. The API response body is printed to logs for detail.
 
 ### Fitbit API
 1. Register your app at [Fitbit Developer Console](https://dev.fitbit.com/apps)
@@ -85,8 +89,12 @@ Server runs on `http://localhost:8000`
    ```bash
    python3 auth_fitbit.py
    ```
-3. Follow the instructions to log in and copy the tokens to your `.env` file.
-4. The app handles token refreshing automatically.
+3. Ensure `.env` contains **`FITBIT_ACCESS_TOKEN`**, **`FITBIT_REFRESH_TOKEN`**, **`FITBIT_CLIENT_ID`**, and **`FITBIT_CLIENT_SECRET`**. Without the client id, secret, and refresh token, **token refresh fails** and weight falls back to `"0,0 kg"` when the access token expires.
+
+### Deploying on Render (or similar hosts)
+1. In the service **Environment** tab, set **every** variable from [`.env.example`](.env.example) that you use locally. Common production gaps: missing **`FITBIT_CLIENT_ID`**, **`FITBIT_CLIENT_SECRET`**, **`FITBIT_REFRESH_TOKEN`**, or Oura **`daily`** scope after re-auth.
+2. **Token refresh persistence:** `save_token` in this app updates `os.environ` and writes `.env` on disk. On Render the filesystem is ephemeral and **dashboard env vars are not updated** by the app. Refreshed tokens apply to **that process only**. With **multiple Gunicorn workers**, workers that did not refresh may still use the old access token until you **redeploy** or **paste new tokens into the dashboard**. Prefer **`gunicorn -w 1`** (single worker) unless you use external token storage.
+3. Cold starts and many upstream API calls can make **`GET /`** slow; use health checks with a generous timeout or hit `/` once to wake the service.
 
 ## Project Structure
 ```
