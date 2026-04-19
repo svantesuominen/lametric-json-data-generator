@@ -111,26 +111,32 @@ def get_latest_weight():
     Returns weight in the user's unit system (see Fitbit localization), or 0 if unavailable.
     """
     today = datetime.date.today()
-    end = today.isoformat()
 
-    # Try shorter windows first; many users log rarely, so fall back to longer ranges.
-    for period in ("30d", "1y", "max"):
-        url = f"{FITBIT_API_URL}/body/log/weight/date/{end}/{period}.json"
+    # The Fitbit weight-log endpoint caps date ranges at 31 days.
+    # Walk backwards in 30-day windows (up to ~1 year) to find the latest entry.
+    window = datetime.timedelta(days=30)
+    end = today
+    for _ in range(12):
+        start = end - window
+        url = (
+            f"{FITBIT_API_URL}/body/log/weight"
+            f"/date/{start.isoformat()}/{end.isoformat()}.json"
+        )
         data = make_request(url)
         if not data:
             return 0.0
 
         try:
             weight_logs = data.get("weight") or []
-            if not weight_logs:
-                continue
-
-            latest = sorted(weight_logs, key=_weight_entry_sort_key, reverse=True)[0]
-            weight_kg = latest.get("weight", 0)
-            if weight_kg:
-                return float(weight_kg)
+            if weight_logs:
+                latest = sorted(weight_logs, key=_weight_entry_sort_key, reverse=True)[0]
+                weight_kg = latest.get("weight", 0)
+                if weight_kg:
+                    return float(weight_kg)
         except Exception as e:
             print(f"Error parsing Fitbit weight data: {e}")
             return 0.0
+
+        end = start
 
     return 0.0

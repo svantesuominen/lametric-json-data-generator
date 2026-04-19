@@ -22,43 +22,47 @@ def save_token(access_token, refresh_token):
 
 def refresh_oura_token():
     """Refresh the Oura access token using the refresh token."""
-    client_id = os.getenv("OURA_CLIENT_ID")
-    client_secret = os.getenv("OURA_CLIENT_SECRET")
-    refresh_token = os.getenv("OURA_REFRESH_TOKEN")
-    
+    client_id = (os.getenv("OURA_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("OURA_CLIENT_SECRET") or "").strip()
+    refresh_token = (os.getenv("OURA_REFRESH_TOKEN") or "").strip()
+
     if not all([client_id, client_secret, refresh_token]):
         print("Missing Oura credentials (CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN). Cannot refresh.")
         return False
-        
+
     token_url = "https://api.ouraring.com/oauth/token"
-    
+
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
         "client_id": client_id,
-        "client_secret": client_secret
+        "client_secret": client_secret,
     }
-    
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    r = None
     try:
-        r = requests.post(token_url, data=data, timeout=10)
+        r = requests.post(token_url, headers=headers, data=data, timeout=10)
         r.raise_for_status()
         tokens = r.json()
-        
+
         new_access = tokens.get("access_token")
         new_refresh = tokens.get("refresh_token")
-        
+
         if new_access and new_refresh:
             save_token(new_access, new_refresh)
             print("Successfully refreshed Oura token.")
             return True
     except Exception as e:
         print(f"Failed to refresh Oura token: {e}")
-        try:
-            if r.text:
-                print(f"Response: {r.text}")
-        except:
-            pass
-            
+        if r is not None and getattr(r, "text", None):
+            print(f"Response: {r.text}")
+        print(
+            "Oura: if refresh keeps failing, get new tokens by authorizing your app again "
+            "(refresh tokens are single-use; a second client reusing an old refresh token breaks both). "
+            "See README.md Oura API section."
+        )
+
     return False
 
 def get_oura_headers():
