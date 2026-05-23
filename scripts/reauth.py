@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import os
 import sys
+import time
 import threading
 import urllib.parse
 import webbrowser
@@ -121,6 +122,12 @@ def reauth_oura() -> bool:
             set_key(ENV_PATH, env_key, val)
             os.environ[env_key] = val
 
+    expires_in = tokens.get("expires_in")
+    if expires_in:
+        expires_at = str(int(time.time()) + int(expires_in))
+        set_key(ENV_PATH, "OURA_TOKEN_EXPIRES_AT", expires_at)
+        os.environ["OURA_TOKEN_EXPIRES_AT"] = expires_at
+
     print("OK    Oura tokens saved to .env")
     return True
 
@@ -176,6 +183,12 @@ def reauth_fitbit() -> bool:
     user_id = tokens.get("user_id")
     if user_id:
         set_key(ENV_PATH, "FITBIT_USER_ID", user_id)
+
+    expires_in = tokens.get("expires_in")
+    if expires_in:
+        expires_at = str(int(time.time()) + int(expires_in))
+        set_key(ENV_PATH, "FITBIT_TOKEN_EXPIRES_AT", expires_at)
+        os.environ["FITBIT_TOKEN_EXPIRES_AT"] = expires_at
 
     print("OK    Fitbit tokens saved to .env")
     return True

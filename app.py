@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+import time
+import threading
 from flask import Flask, jsonify
 from dotenv import load_dotenv
 import oura
@@ -11,6 +13,23 @@ import hockey
 load_dotenv()
 
 app = Flask(__name__)
+
+_BACKGROUND_REFRESH_INTERVAL = 4 * 3600  # check every 4 hours
+
+
+def _background_token_refresh():
+    """Periodically refresh tokens that are close to expiry."""
+    while True:
+        time.sleep(_BACKGROUND_REFRESH_INTERVAL)
+        try:
+            if oura._token_needs_refresh():
+                print("[bg-refresh] Oura token expiring soon, refreshing...")
+                oura.refresh_oura_token()
+            if fitbit._token_needs_refresh():
+                print("[bg-refresh] Fitbit token expiring soon, refreshing...")
+                fitbit.refresh_fitbit_token()
+        except Exception as e:
+            print(f"[bg-refresh] Error: {e}")
 
 
 def _format_sleep_debt_seconds(sec):
@@ -54,7 +73,8 @@ def root_custom_json():
     calories_str = f"{int(round(calories_burned))} kcal"
     
     daily_metrics = oura.get_daily_metrics()
-    avg_metrics = oura.get_avg_hrv_heartrate(3)
+    avg_metrics = oura.get_avg_hrv_heartrate()
+    workout_counts = oura.get_workout_counts_this_year()
     
     weight_kg_val = fitbit.get_latest_weight()
     # Format: "88,5 kg" (using comma as decimal separator per user request "xy,z")
@@ -86,8 +106,8 @@ def root_custom_json():
         "readiness": daily_metrics["readiness_score"],
         "sleep_time": sleep_time_str,
         "sleep_score": sleep_score,
-        "avg_hrv_3d": avg_metrics["avg_hrv"],
-        "avg_rest_hr_3d": avg_metrics["avg_heart_rate"],
+        "avg_hrv_3d": f"{avg_metrics['avg_hrv_3d']} ({avg_metrics['avg_hrv_7d']})",
+        "avg_rest_hr_3d": f"{avg_metrics['avg_hr_3d']} ({avg_metrics['avg_hr_7d']})",
         "calories_intake": 0,  # Placeholder - requires nutrition API
         "calories_consumed": calories_str,
         "weight": weight_str,
@@ -96,6 +116,7 @@ def root_custom_json():
         "kapyla_ice": rink_conditions["kapyla_ice"],
         "kapyla_ice_rink": rink_conditions["kapyla_ice_rink"],
         "ogeli_ice": rink_conditions["ogeli_ice"],
+        "workouts_qty": workout_counts,
     }
     return jsonify(resp)
 
@@ -118,7 +139,7 @@ def lametric_frames():
         debt_info = oura.get_sleep_debt_heuristic()
         cv_age = oura.get_latest_cardiovascular_age()
         calories_burned = oura.get_activity_calories()
-        avg_metrics = oura.get_avg_hrv_heartrate(3)
+        avg_metrics = oura.get_avg_hrv_heartrate()
     except Exception as e:
         print(f"Error fetching Oura data: {e}")
         daily_metrics = {"steps": 0, "readiness_score": 0}
@@ -128,7 +149,7 @@ def lametric_frames():
         debt_info = {"debt_seconds": 0}
         cv_age = None
         calories_burned = 0
-        avg_metrics = {"avg_hrv": 0, "avg_heart_rate": 0}
+        avg_metrics = {"avg_hrv_3d": 0, "avg_hrv_7d": 0, "avg_hr_3d": 0, "avg_hr_7d": 0}
 
     # 3. Fetch Fitbit Data
     try:
@@ -160,8 +181,8 @@ def lametric_frames():
         {"text": f"{ran_km} km run", "icon": "i1234"},
         {"text": cv_text, "icon": "i52"},
         {"text": f"{weight_str} kg", "icon": "i2110"},
-        {"text": f"{avg_metrics['avg_hrv']} hrv (3d)", "icon": "i52"},
-        {"text": f"{avg_metrics['avg_heart_rate']} bpm (3d)", "icon": "i31"},
+        {"text": f"{avg_metrics['avg_hrv_3d']} ({avg_metrics['avg_hrv_7d']}) hrv", "icon": "i52"},
+        {"text": f"{avg_metrics['avg_hr_3d']} ({avg_metrics['avg_hr_7d']}) bpm", "icon": "i31"},
         
         # Bike Stations
         {"text": f"Pohjola: {counts['pohjolankatu_bikes']} 🚲", "icon": "i1234"},
@@ -169,6 +190,36 @@ def lametric_frames():
     ]
     return jsonify({"frames": frames})
 
+@app.route("/health")
+def health():
+    """Token status and readiness check."""
+    now = int(time.time())
+
+    def _token_status(name, token_env, expires_env):
+        token = (os.getenv(token_env) or "").strip()
+        expires_at = os.getenv(expires_env, "").strip()
+        if not token:
+            return {"status": "missing"}
+        if not expires_at:
+            return {"status": "ok", "expires": "unknown (no expiry tracked yet)"}
+        try:
+            exp = int(expires_at)
+            remaining = exp - now
+            if remaining <= 0:
+                return {"status": "expired", "expired_ago_seconds": -remaining}
+            return {"status": "ok", "expires_in_seconds": remaining,
+                    "expires_in_hours": round(remaining / 3600, 1)}
+        except ValueError:
+            return {"status": "ok", "expires": "unparseable"}
+
+    return jsonify({
+        "oura": _token_status("oura", "OURA_ACCESS_TOKEN", "OURA_TOKEN_EXPIRES_AT"),
+        "fitbit": _token_status("fitbit", "FITBIT_ACCESS_TOKEN", "FITBIT_TOKEN_EXPIRES_AT"),
+    })
+
+
 if __name__ == "__main__":
+    t = threading.Thread(target=_background_token_refresh, daemon=True)
+    t.start()
     port = int(os.getenv("PORT", "8000"))
     app.run(host="0.0.0.0", port=port)

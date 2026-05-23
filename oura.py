@@ -1,92 +1,119 @@
 import os
+import time
+import threading
 import requests
 import datetime
 from collections import defaultdict
 from dotenv import load_dotenv, set_key
 
-# Load environment variables
 load_dotenv()
 
-# Documentation: https://cloud.ouraring.com/docs/
 OURA_API_URL = "https://api.ouraring.com/v2/usercollection"
 ENV_PATH = ".env"
 
-def save_token(access_token, refresh_token):
-    """Save new tokens to environment and .env file."""
+_REFRESH_MARGIN_SECONDS = 3600  # refresh 1 hour before expiry
+_refresh_lock = threading.Lock()
+
+
+def save_token(access_token, refresh_token, expires_in=None):
+    """Save new tokens to environment and .env file, including expiry timestamp."""
     os.environ["OURA_ACCESS_TOKEN"] = access_token
     os.environ["OURA_REFRESH_TOKEN"] = refresh_token
-    
-    # Persist to .env
+
     set_key(ENV_PATH, "OURA_ACCESS_TOKEN", access_token)
     set_key(ENV_PATH, "OURA_REFRESH_TOKEN", refresh_token)
 
-def refresh_oura_token():
-    """Refresh the Oura access token using the refresh token."""
-    client_id = (os.getenv("OURA_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("OURA_CLIENT_SECRET") or "").strip()
-    refresh_token = (os.getenv("OURA_REFRESH_TOKEN") or "").strip()
+    if expires_in:
+        expires_at = str(int(time.time()) + int(expires_in))
+        os.environ["OURA_TOKEN_EXPIRES_AT"] = expires_at
+        set_key(ENV_PATH, "OURA_TOKEN_EXPIRES_AT", expires_at)
 
-    if not all([client_id, client_secret, refresh_token]):
-        print("Missing Oura credentials (CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN). Cannot refresh.")
+
+def _token_needs_refresh():
+    """Return True if the access token is missing or will expire within the margin."""
+    token = (os.getenv("OURA_ACCESS_TOKEN") or "").strip()
+    if not token:
+        return True
+    expires_at = os.getenv("OURA_TOKEN_EXPIRES_AT", "").strip()
+    if not expires_at:
+        return False  # no expiry tracked yet; wait for a 401
+    try:
+        return time.time() > (int(expires_at) - _REFRESH_MARGIN_SECONDS)
+    except ValueError:
         return False
 
-    token_url = "https://api.ouraring.com/oauth/token"
 
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-        "client_secret": client_secret,
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+def refresh_oura_token():
+    """Refresh the Oura access token using the refresh token (thread-safe)."""
+    with _refresh_lock:
+        if not _token_needs_refresh():
+            return True  # another thread already refreshed
 
-    r = None
-    try:
-        r = requests.post(token_url, headers=headers, data=data, timeout=10)
-        r.raise_for_status()
-        tokens = r.json()
+        client_id = (os.getenv("OURA_CLIENT_ID") or "").strip()
+        client_secret = (os.getenv("OURA_CLIENT_SECRET") or "").strip()
+        refresh_token = (os.getenv("OURA_REFRESH_TOKEN") or "").strip()
 
-        new_access = tokens.get("access_token")
-        new_refresh = tokens.get("refresh_token")
+        if not all([client_id, client_secret, refresh_token]):
+            print("Missing Oura credentials (CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN). Cannot refresh.")
+            return False
 
-        if new_access and new_refresh:
-            save_token(new_access, new_refresh)
-            print("Successfully refreshed Oura token.")
-            return True
-    except Exception as e:
-        print(f"Failed to refresh Oura token: {e}")
-        if r is not None and getattr(r, "text", None):
-            print(f"Response: {r.text}")
-        print(
-            "Oura: if refresh keeps failing, get new tokens by authorizing your app again "
-            "(refresh tokens are single-use; a second client reusing an old refresh token breaks both). "
-            "See README.md Oura API section."
-        )
+        token_url = "https://api.ouraring.com/oauth/token"
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    return False
+        r = None
+        try:
+            r = requests.post(token_url, headers=headers, data=data, timeout=10)
+            r.raise_for_status()
+            tokens = r.json()
+
+            new_access = tokens.get("access_token")
+            new_refresh = tokens.get("refresh_token")
+            expires_in = tokens.get("expires_in")
+
+            if new_access and new_refresh:
+                save_token(new_access, new_refresh, expires_in)
+                print("Successfully refreshed Oura token.")
+                return True
+        except Exception as e:
+            print(f"Failed to refresh Oura token: {e}")
+            if r is not None and getattr(r, "text", None):
+                print(f"Response: {r.text}")
+            print(
+                "Oura: run  python3 scripts/reauth.py  to re-authorize "
+                "(refresh tokens are single-use; external usage breaks the chain)."
+            )
+
+        return False
+
 
 def get_oura_headers():
     token = os.getenv("OURA_ACCESS_TOKEN", "").strip()
     if not token:
         return {}
-    return {
-        "Authorization": f"Bearer {token}"
-    }
+    return {"Authorization": f"Bearer {token}"}
+
 
 def make_request(url, params=None):
-    """Make a GET request with auto-refresh logic."""
+    """Make a GET request with proactive + reactive token refresh."""
+    if _token_needs_refresh():
+        refresh_oura_token()
+
     headers = get_oura_headers()
     if not headers:
         return None
-        
+
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
-        
-        # If unauthorized, try to refresh and retry
+
         if r.status_code == 401:
             print("Oura token expired (401), attempting refresh...")
             if refresh_oura_token():
-                # Update headers with new token
                 headers = get_oura_headers()
                 r = requests.get(url, headers=headers, params=params, timeout=10)
             else:
@@ -156,6 +183,22 @@ def get_sleep_data():
         "day": sleep_day
     }
     return result
+
+def get_workout_counts_this_year():
+    """
+    Count workouts by activity type for the current calendar year.
+    Returns a dict mapping activity names to counts, e.g. {"cycling": 42, "running": 15}.
+    """
+    today = datetime.date.today()
+    start_of_year = datetime.date(today.year, 1, 1)
+    rows = _collect_paginated("workout", start_of_year, today)
+    counts = defaultdict(int)
+    for w in rows:
+        activity = w.get("activity")
+        if activity:
+            counts[activity] += 1
+    return dict(sorted(counts.items(), key=lambda x: -x[1]))
+
 
 def _sum_workout_distance_meters(start_date, end_date, activities):
     """
@@ -402,47 +445,47 @@ def get_daily_metrics():
     
     return result
 
-def get_avg_hrv_heartrate(days=3):
+def get_avg_hrv_heartrate():
     """
-    Fetch sleep data and calculate average HRV and Heart Rate for the most recent N days.
-    Returns a dict with 'avg_hrv' and 'avg_heart_rate' (ints).
+    Fetch sleep data and calculate average HRV and Heart Rate for the most recent
+    3 days and 7 days. Returns a dict with 3d and 7d averages for both metrics.
     """
     today = datetime.date.today()
-    last_week = today - datetime.timedelta(days=7)
-    
+    start = today - datetime.timedelta(days=10)
+
     params = {
-        "start_date": last_week.isoformat(),
-        "end_date": today.isoformat()
+        "start_date": start.isoformat(),
+        "end_date": today.isoformat(),
     }
-    
+
     url = f"{OURA_API_URL}/sleep"
     data = make_request(url, params=params)
+    empty = {"avg_hrv_3d": 0, "avg_hrv_7d": 0, "avg_hr_3d": 0, "avg_hr_7d": 0}
     if not data:
-        return {"avg_hrv": 0, "avg_heart_rate": 0}
-    
+        return empty
+
     docs = data.get("data", [])
     if not docs:
-        return {"avg_hrv": 0, "avg_heart_rate": 0}
-        
-    # Sort docs by day descending
+        return empty
+
     sorted_docs = sorted(docs, key=lambda x: x.get("day", ""), reverse=True)
-    
-    # Filter for entries that have both HRV and HR
+
     valid_docs = [
-        d for d in sorted_docs 
+        d for d in sorted_docs
         if d.get("average_hrv") is not None and d.get("average_heart_rate") is not None
     ]
-    
-    # Take the most recent 'days' documents
-    recent_docs = valid_docs[:days]
-    if not recent_docs:
-        return {"avg_hrv": 0, "avg_heart_rate": 0}
-        
-    total_hrv = sum(d["average_hrv"] for d in recent_docs)
-    total_hr = sum(d["average_heart_rate"] for d in recent_docs)
-    
-    count = len(recent_docs)
+
+    def _avg(items, key):
+        if not items:
+            return 0
+        return int(round(sum(d[key] for d in items) / len(items)))
+
+    top3 = valid_docs[:3]
+    top7 = valid_docs[:7]
+
     return {
-        "avg_hrv": int(round(total_hrv / count)),
-        "avg_heart_rate": int(round(total_hr / count))
+        "avg_hrv_3d": _avg(top3, "average_hrv"),
+        "avg_hrv_7d": _avg(top7, "average_hrv"),
+        "avg_hr_3d": _avg(top3, "average_heart_rate"),
+        "avg_hr_7d": _avg(top7, "average_heart_rate"),
     }

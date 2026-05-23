@@ -1,97 +1,125 @@
 import os
+import time
+import threading
 import requests
 import datetime
 import base64
 from dotenv import load_dotenv, set_key
 
-# Load environment variables
 load_dotenv()
 
-# Fitbit API documentation: https://dev.fitbit.com/build/reference/web-api/
 FITBIT_API_URL = "https://api.fitbit.com/1/user/-"
 ENV_PATH = ".env"
 
-def save_token(access_token, refresh_token):
-    """Save new tokens to environment and .env file."""
+_REFRESH_MARGIN_SECONDS = 3600
+_refresh_lock = threading.Lock()
+
+
+def save_token(access_token, refresh_token, expires_in=None):
+    """Save new tokens to environment and .env file, including expiry timestamp."""
     os.environ["FITBIT_ACCESS_TOKEN"] = access_token
     os.environ["FITBIT_REFRESH_TOKEN"] = refresh_token
-    
-    # Persist to .env
+
     set_key(ENV_PATH, "FITBIT_ACCESS_TOKEN", access_token)
     set_key(ENV_PATH, "FITBIT_REFRESH_TOKEN", refresh_token)
 
-def refresh_fitbit_token():
-    """Refresh the Fitbit access token using the refresh token."""
-    client_id = os.getenv("FITBIT_CLIENT_ID")
-    client_secret = os.getenv("FITBIT_CLIENT_SECRET")
-    refresh_token = os.getenv("FITBIT_REFRESH_TOKEN")
-    
-    if not all([client_id, client_secret, refresh_token]):
-        print("Missing Fitbit credentials (CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN). Cannot refresh.")
+    if expires_in:
+        expires_at = str(int(time.time()) + int(expires_in))
+        os.environ["FITBIT_TOKEN_EXPIRES_AT"] = expires_at
+        set_key(ENV_PATH, "FITBIT_TOKEN_EXPIRES_AT", expires_at)
+
+
+def _token_needs_refresh():
+    """Return True if the access token is missing or will expire within the margin."""
+    token = (os.getenv("FITBIT_ACCESS_TOKEN") or "").strip()
+    if not token:
+        return True
+    expires_at = os.getenv("FITBIT_TOKEN_EXPIRES_AT", "").strip()
+    if not expires_at:
         return False
-        
-    token_url = "https://api.fitbit.com/oauth2/token"
-    credential = f"{client_id}:{client_secret}".encode("utf-8")
-    b64_cred = base64.b64encode(credential).decode("utf-8")
-    
-    headers = {
-        "Authorization": f"Basic {b64_cred}",
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token
-    }
-    
     try:
-        r = requests.post(token_url, headers=headers, data=data)
-        r.raise_for_status()
-        tokens = r.json()
-        
-        new_access = tokens.get("access_token")
-        new_refresh = tokens.get("refresh_token")
-        
-        if new_access and new_refresh:
-            save_token(new_access, new_refresh)
-            print("Successfully refreshed Fitbit token.")
+        return time.time() > (int(expires_at) - _REFRESH_MARGIN_SECONDS)
+    except ValueError:
+        return False
+
+
+def refresh_fitbit_token():
+    """Refresh the Fitbit access token using the refresh token (thread-safe)."""
+    with _refresh_lock:
+        if not _token_needs_refresh():
             return True
-    except Exception as e:
-        print(f"Failed to refresh Fitbit token: {e}")
-        if r.text:
-            print(f"Response: {r.text}")
-            
-    return False
+
+        client_id = (os.getenv("FITBIT_CLIENT_ID") or "").strip()
+        client_secret = (os.getenv("FITBIT_CLIENT_SECRET") or "").strip()
+        refresh_token = (os.getenv("FITBIT_REFRESH_TOKEN") or "").strip()
+
+        if not all([client_id, client_secret, refresh_token]):
+            print("Missing Fitbit credentials (CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN). Cannot refresh.")
+            return False
+
+        token_url = "https://api.fitbit.com/oauth2/token"
+        credential = f"{client_id}:{client_secret}".encode("utf-8")
+        b64_cred = base64.b64encode(credential).decode("utf-8")
+
+        headers = {
+            "Authorization": f"Basic {b64_cred}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+
+        r = None
+        try:
+            r = requests.post(token_url, headers=headers, data=data, timeout=10)
+            r.raise_for_status()
+            tokens = r.json()
+
+            new_access = tokens.get("access_token")
+            new_refresh = tokens.get("refresh_token")
+            expires_in = tokens.get("expires_in")
+
+            if new_access and new_refresh:
+                save_token(new_access, new_refresh, expires_in)
+                print("Successfully refreshed Fitbit token.")
+                return True
+        except Exception as e:
+            print(f"Failed to refresh Fitbit token: {e}")
+            if r is not None and getattr(r, "text", None):
+                print(f"Response: {r.text}")
+
+        return False
+
 
 def get_fitbit_headers():
-    """Get authorization headers for Fitbit API."""
     token = os.getenv("FITBIT_ACCESS_TOKEN", "").strip()
     if not token:
         return {}
-    return {
-        "Authorization": f"Bearer {token}"
-    }
+    return {"Authorization": f"Bearer {token}"}
+
 
 def make_request(url):
-    """Make a GET request with auto-refresh logic."""
+    """Make a GET request with proactive + reactive token refresh."""
+    if _token_needs_refresh():
+        refresh_fitbit_token()
+
     headers = get_fitbit_headers()
     if not headers:
         return None
-        
+
     try:
         r = requests.get(url, headers=headers, timeout=10)
-        
-        # If unauthorized, try to refresh and retry
+
         if r.status_code == 401:
             print("Fitbit token expired (401), attempting refresh...")
             if refresh_fitbit_token():
-                # Update headers with new token
                 headers = get_fitbit_headers()
                 r = requests.get(url, headers=headers, timeout=10)
             else:
                 print("Token refresh failed or not possible.")
                 return None
-                
+
         r.raise_for_status()
         return r.json()
     except Exception as e:
