@@ -43,10 +43,10 @@ def _token_needs_refresh():
         return False
 
 
-def refresh_oura_token():
+def refresh_oura_token(force=False):
     """Refresh the Oura access token using the refresh token (thread-safe)."""
     with _refresh_lock:
-        if not _token_needs_refresh():
+        if not force and not _token_needs_refresh():
             return True  # another thread already refreshed
 
         client_id = (os.getenv("OURA_CLIENT_ID") or "").strip()
@@ -113,7 +113,7 @@ def make_request(url, params=None):
 
         if r.status_code == 401:
             print("Oura token expired (401), attempting refresh...")
-            if refresh_oura_token():
+            if refresh_oura_token(force=True):
                 headers = get_oura_headers()
                 r = requests.get(url, headers=headers, params=params, timeout=10)
             else:

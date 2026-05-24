@@ -43,10 +43,10 @@ def _token_needs_refresh():
         return False
 
 
-def refresh_fitbit_token():
+def refresh_fitbit_token(force=False):
     """Refresh the Fitbit access token using the refresh token (thread-safe)."""
     with _refresh_lock:
-        if not _token_needs_refresh():
+        if not force and not _token_needs_refresh():
             return True
 
         client_id = (os.getenv("FITBIT_CLIENT_ID") or "").strip()
@@ -113,7 +113,7 @@ def make_request(url):
 
         if r.status_code == 401:
             print("Fitbit token expired (401), attempting refresh...")
-            if refresh_fitbit_token():
+            if refresh_fitbit_token(force=True):
                 headers = get_fitbit_headers()
                 r = requests.get(url, headers=headers, timeout=10)
             else:
